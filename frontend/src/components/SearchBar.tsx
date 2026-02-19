@@ -22,7 +22,9 @@ export function SearchBar({ value, onChange, placeholder }: SearchBarProps) {
         placeholder={placeholder || 'Search assets...'}
       />
       <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-        <Sparkles className="h-5 w-5 text-purple-400" title="AI-powered search" />
+        <span title="AI-powered search">
+          <Sparkles className="h-5 w-5 text-purple-400" />
+        </span>
       </div>
     </div>
   )
