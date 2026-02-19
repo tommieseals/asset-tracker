@@ -1,4 +1,4 @@
-"Pydantic schemas for request/response validation"
+"""Pydantic schemas for request/response validation"""
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -38,7 +38,7 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str = bearer
+    token_type: str = "bearer"
 
 class TokenRefresh(BaseModel):
     refresh_token: str
@@ -59,7 +59,7 @@ class AssetBase(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 class AssetCreate(AssetBase):
-    asset_tag: Optional[str] = None  # Auto-generated if not provided
+    asset_tag: Optional[str] = None
 
 class AssetUpdate(BaseModel):
     name: Optional[str] = None
@@ -132,7 +132,7 @@ class SearchResult(BaseModel):
 
 # ============== Export Schemas ==============
 class ExportRequest(BaseModel):
-    format: str = Field(default=csv, pattern=^(csv|xlsx)$)
+    format: str = Field(default="csv", pattern="^(csv|xlsx)$")
     category: Optional[AssetCategory] = None
     status: Optional[AssetStatus] = None
 
@@ -145,4 +145,3 @@ class DashboardStats(BaseModel):
     retired_assets: int
     assets_by_category: Dict[str, int]
     recent_activity: List[AuditLogResponse]
-EOF

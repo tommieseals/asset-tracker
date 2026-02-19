@@ -1,4 +1,4 @@
-"Asset management endpoints"
+"""Asset management endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,8 +20,8 @@ from ..auth import get_current_user, require_admin
 router = APIRouter()
 
 def generate_asset_tag() -> str:
-    "Generate unique asset tag"
-    return fAST-uuid.uuid4().hex[:8].upper()
+    """Generate unique asset tag"""
+    return f"AST-{uuid.uuid4().hex[:8].upper()}"
 
 async def log_audit(
     db: AsyncSession, 
@@ -32,7 +32,7 @@ async def log_audit(
     changes: dict,
     request: Optional[Request] = None
 ):
-    "Create audit log entry"
+    """Create audit log entry"""
     audit = AuditLog(
         action=action,
         entity_type=entity_type,
@@ -40,25 +40,23 @@ async def log_audit(
         user_id=user_id,
         changes=changes,
         ip_address=request.client.host if request else None,
-        user_agent=request.headers.get(user-agent) if request else None
+        user_agent=request.headers.get("user-agent") if request else None
     )
     db.add(audit)
 
-@router.get(/dashboard, response_model=DashboardStats)
+@router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Get dashboard statistics"
-    # Total counts by status
+    """Get dashboard statistics"""
     status_counts = {}
-    for status in AssetStatus:
+    for s in AssetStatus:
         result = await db.execute(
-            select(func.count(Asset.id)).filter(Asset.status == status)
+            select(func.count(Asset.id)).filter(Asset.status == s)
         )
-        status_counts[status.value] = result.scalar()
+        status_counts[s.value] = result.scalar()
     
-    # Count by category
     category_counts = {}
     for category in AssetCategory:
         result = await db.execute(
@@ -68,10 +66,9 @@ async def get_dashboard_stats(
         if count > 0:
             category_counts[category.value] = count
     
-    # Recent activity
     result = await db.execute(
         select(AuditLog)
-        .filter(AuditLog.entity_type == asset)
+        .filter(AuditLog.entity_type == "asset")
         .order_by(AuditLog.timestamp.desc())
         .limit(10)
     )
@@ -81,63 +78,62 @@ async def get_dashboard_stats(
     
     return DashboardStats(
         total_assets=total,
-        available_assets=status_counts.get(available, 0),
-        checked_out_assets=status_counts.get(checked_out, 0),
-        maintenance_assets=status_counts.get(maintenance, 0),
-        retired_assets=status_counts.get(retired, 0),
+        available_assets=status_counts.get("available", 0),
+        checked_out_assets=status_counts.get("checked_out", 0),
+        maintenance_assets=status_counts.get("maintenance", 0),
+        retired_assets=status_counts.get("retired", 0),
         assets_by_category=category_counts,
         recent_activity=recent
     )
 
-@router.post(/, response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     asset_data: AssetCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Create a new asset"
+    """Create a new asset"""
     asset_tag = asset_data.asset_tag or generate_asset_tag()
     
-    # Check for duplicate serial number
     if asset_data.serial_number:
         result = await db.execute(
             select(Asset).filter(Asset.serial_number == asset_data.serial_number)
         )
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=Serial number already exists)
+            raise HTTPException(status_code=400, detail="Serial number already exists")
     
     asset = Asset(
         asset_tag=asset_tag,
-        **asset_data.model_dump(exclude={asset_tag})
+        **asset_data.model_dump(exclude={"asset_tag"})
     )
     db.add(asset)
     await db.flush()
     
-    await log_audit(db, create, asset, asset.id, current_user.id, 
-                    {asset_tag: asset_tag, name: asset.name}, request)
+    await log_audit(db, "create", "asset", asset.id, current_user.id, 
+                    {"asset_tag": asset_tag, "name": asset.name}, request)
     
     await db.commit()
     await db.refresh(asset)
     return asset
 
-@router.get(/, response_model=List[AssetResponse])
+@router.get("/", response_model=List[AssetResponse])
 async def list_assets(
     skip: int = 0,
     limit: int = 100,
     category: Optional[AssetCategory] = None,
-    status: Optional[AssetStatus] = None,
+    status_filter: Optional[AssetStatus] = None,
     assigned_to: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "List assets with optional filters"
+    """List assets with optional filters"""
     query = select(Asset).options(selectinload(Asset.assignee))
     
     if category:
         query = query.filter(Asset.category == category)
-    if status:
-        query = query.filter(Asset.status == status)
+    if status_filter:
+        query = query.filter(Asset.status == status_filter)
     if assigned_to:
         query = query.filter(Asset.assigned_to == assigned_to)
     
@@ -145,37 +141,37 @@ async def list_assets(
     result = await db.execute(query)
     return result.scalars().all()
 
-@router.get(/asset_id, response_model=AssetResponse)
+@router.get("/{asset_id}", response_model=AssetResponse)
 async def get_asset(
     asset_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Get asset by ID"
+    """Get asset by ID"""
     result = await db.execute(
         select(Asset).options(selectinload(Asset.assignee)).filter(Asset.id == asset_id)
     )
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=Asset not found)
+        raise HTTPException(status_code=404, detail="Asset not found")
     return asset
 
-@router.get(/tag/asset_tag, response_model=AssetResponse)
+@router.get("/tag/{asset_tag}", response_model=AssetResponse)
 async def get_asset_by_tag(
     asset_tag: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Get asset by asset tag (for QR code scanning)"
+    """Get asset by asset tag (for QR code scanning)"""
     result = await db.execute(
         select(Asset).options(selectinload(Asset.assignee)).filter(Asset.asset_tag == asset_tag)
     )
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=Asset not found)
+        raise HTTPException(status_code=404, detail="Asset not found")
     return asset
 
-@router.patch(/asset_id, response_model=AssetResponse)
+@router.patch("/{asset_id}", response_model=AssetResponse)
 async def update_asset(
     asset_id: int,
     asset_update: AssetUpdate,
@@ -183,11 +179,11 @@ async def update_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Update asset"
+    """Update asset"""
     result = await db.execute(select(Asset).filter(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=Asset not found)
+        raise HTTPException(status_code=404, detail="Asset not found")
     
     update_data = asset_update.model_dump(exclude_unset=True)
     old_values = {k: getattr(asset, k) for k in update_data}
@@ -195,14 +191,14 @@ async def update_asset(
     for field, value in update_data.items():
         setattr(asset, field, value)
     
-    await log_audit(db, update, asset, asset.id, current_user.id,
-                    {old: old_values, new: update_data}, request)
+    await log_audit(db, "update", "asset", asset.id, current_user.id,
+                    {"old": old_values, "new": update_data}, request)
     
     await db.commit()
     await db.refresh(asset)
     return asset
 
-@router.post(/asset_id/checkout, response_model=AssetResponse)
+@router.post("/{asset_id}/checkout", response_model=AssetResponse)
 async def checkout_asset(
     asset_id: int,
     checkout_data: AssetCheckout,
@@ -210,26 +206,23 @@ async def checkout_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Check out asset to a user"
+    """Check out asset to a user"""
     result = await db.execute(select(Asset).filter(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=Asset not found)
+        raise HTTPException(status_code=404, detail="Asset not found")
     
     if asset.status != AssetStatus.AVAILABLE:
-        raise HTTPException(status_code=400, detail=fAsset is not available (status: asset.status))
+        raise HTTPException(status_code=400, detail=f"Asset is not available (status: {asset.status})")
     
-    # Verify user exists
     user_result = await db.execute(select(User).filter(User.id == checkout_data.user_id))
     target_user = user_result.scalar_one_or_none()
     if not target_user:
-        raise HTTPException(status_code=404, detail=Target user not found)
+        raise HTTPException(status_code=404, detail="Target user not found")
     
-    # Update asset
     asset.status = AssetStatus.CHECKED_OUT
     asset.assigned_to = checkout_data.user_id
     
-    # Create checkout history
     history = CheckoutHistory(
         asset_id=asset.id,
         user_id=checkout_data.user_id,
@@ -238,14 +231,14 @@ async def checkout_asset(
     )
     db.add(history)
     
-    await log_audit(db, checkout, asset, asset.id, current_user.id,
-                    {user_id: checkout_data.user_id, notes: checkout_data.notes}, request)
+    await log_audit(db, "checkout", "asset", asset.id, current_user.id,
+                    {"user_id": checkout_data.user_id, "notes": checkout_data.notes}, request)
     
     await db.commit()
     await db.refresh(asset)
     return asset
 
-@router.post(/asset_id/checkin, response_model=AssetResponse)
+@router.post("/{asset_id}/checkin", response_model=AssetResponse)
 async def checkin_asset(
     asset_id: int,
     checkin_data: AssetCheckin,
@@ -253,16 +246,15 @@ async def checkin_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    "Check in asset"
+    """Check in asset"""
     result = await db.execute(select(Asset).filter(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=Asset not found)
+        raise HTTPException(status_code=404, detail="Asset not found")
     
     if asset.status != AssetStatus.CHECKED_OUT:
-        raise HTTPException(status_code=400, detail=Asset is not checked out)
+        raise HTTPException(status_code=400, detail="Asset is not checked out")
     
-    # Update latest checkout history
     history_result = await db.execute(
         select(CheckoutHistory)
         .filter(CheckoutHistory.asset_id == asset.id, CheckoutHistory.checkin_date == None)
@@ -272,7 +264,6 @@ async def checkin_asset(
     if history:
         history.checkin_date = datetime.utcnow()
         history.checked_in_by = current_user.id
-        history.notes = (history.notes or ") + f | Check-in:  or }"
     
     old_assignee = asset.assigned_to
     asset.status = AssetStatus.AVAILABLE
@@ -324,7 +315,7 @@ async def export_assets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Export assets to CSV or Excel"""
+    """Export assets to CSV"""
     query = select(Asset).options(selectinload(Asset.assignee))
     
     if export_req.category:
@@ -335,7 +326,6 @@ async def export_assets(
     result = await db.execute(query)
     assets = result.scalars().all()
     
-    # Generate CSV
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -352,9 +342,9 @@ async def export_assets(
         ])
     
     output.seek(0)
+    filename = f"assets_{datetime.now().strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=assets_{datetime.now().strftime(%Y%m%d)}.csv"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
-EOF"
